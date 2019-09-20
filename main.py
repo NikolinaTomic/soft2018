@@ -4,7 +4,7 @@ import argparse
 import matplotlib.pyplot as plt
 
 from architecture import Model
-from utils import preprocess_image, find_center, pnt2line, pnt2line2
+from utils import preprocess_image, find_center, pnt2line
 from detection import detect_lines, select_roi, search_for_detection
 import numpy as np
 
@@ -17,6 +17,35 @@ class Detection:
         self.center = center
         self.frame_idx = frame_idx
         self.history = []
+
+    def intersecting_blue(self, blue_line_points):
+        passed_blue_line_before = self.passed_blue_line
+        if not passed_blue_line_before:
+            print(blue_line_points[0], blue_line_points[1])
+            dist_blue, pnt, r_blue, skip_frame = pnt2line(detection.center, blue_line_points[0],
+                                                    blue_line_points[1])
+            if skip_frame:
+                return False, True
+
+        if dist_blue < 12.0 and not passed_blue_line_before and r_blue == 1:
+            self.passed_blue_line = True
+            return True, False
+
+        return False, False
+
+    def intersecting_green(self,green_line_points):
+        passed_green_line_before = self.passed_green_line
+        if not passed_green_line_before:
+            dist_green, pnt, r_green, skip_frame = pnt2line(detection.center, green_line_points[0],
+                                                      green_line_points[1])
+            if skip_frame:
+                return False, True
+
+        if dist_green < 12.0 and not passed_green_line_before and r_green == 1:
+            self.passed_green_line = True
+            return True, False
+
+        return False, False
 
 
 class History:
@@ -118,37 +147,29 @@ if __name__ == "__main__":
                     if (frame_idx - detection.frame_idx) > 10:
                         continue
 
-                    passed_green_line_before = detection.passed_green_line
-                    passed_blue_line_before = detection.passed_blue_line
-
                     color = [0, 0, 255]
-                    if passed_blue_line_before == False:
-                        print(detect_line_points[0][0], detect_line_points[0][1])
-                        dist_blue, pnt, r_blue, skip = pnt2line(detection.center, detect_line_points[0][0], detect_line_points[0][1])
-                        if skip:
-                            continue
+                    intersecting_blue, skipping_frame = detection.intersecting_blue(detect_line_points[0])
+                    if skipping_frame:
+                        continue
+                    elif intersecting_blue:
+                        num_sum += detection.label
+                        color = [220, 0, 0]
                         cv2.line(frame, (detect_line_points[0][0][0], detect_line_points[0][0][1]),
                                  (detect_line_points[0][1][0], detect_line_points[0][1][1]), (0, 0, 255), 1, cv2.LINE_AA)
 
-                    if dist_blue < 12.0 and not passed_blue_line_before and r_blue == 1:
-                        num_sum += detection.label
-                        detection.passed_blue_line = True
-                        color = [220, 0, 0]
-
-                    if not passed_green_line_before:
-                        dist_green, pnt, r_green, skip = pnt2line(detection.center, detect_line_points[1][0], detect_line_points[1][1])
-                        if skip:
-                            continue
-                        cv2.line(frame, (detect_line_points[1][0][0], detect_line_points[1][0][1]),
-                                 (detect_line_points[1][1][0], detect_line_points[1][1][1]), (0, 0, 255), 1, cv2.LINE_AA)
-
-                    if dist_green < 12.0 and not passed_green_line_before and r_green == 1:
+                    intersecting_green, skipping_frame = detection.intersecting_green(detect_line_points[1])
+                    if skipping_frame:
+                        continue
+                    elif intersecting_green:
                         num_sum -= detection.label
-                        detection.passed_green_line = True
                         color = [0, 220, 0]
+                        cv2.line(frame, (detect_line_points[1][0][0], detect_line_points[1][0][1]),
+                                 (detect_line_points[1][1][0], detect_line_points[1][1][1]), (0, 0, 255), 1,
+                                 cv2.LINE_AA)
+
 
                     cv2.circle(frame, detection.center, 15, color, 2)
-                    cv2.putText(frame, str(detection.value), (detection.center[0] + 12, detection.center[1] + 12),
+                    cv2.putText(frame, str(detection.label), (detection.center[0] + 12, detection.center[1] + 12),
                                 cv2.FONT_HERSHEY_COMPLEX, 1, (255, 0, 0), 2)
 
                     for hst in detection.history:
@@ -156,7 +177,7 @@ if __name__ == "__main__":
                             cv2.circle(frame, hst.center, 1, (255, 255, 255), 1)
 
                 cv2.putText(frame, "Sum: " + str(num_sum) + "Frame number:" + str(frame_idx), (15, 20), cv2.FONT_HERSHEY_COMPLEX,1,(255, 0, 0), 1)
-                cv2.imshow('frame', frame)
+                cv2.imshow("frame",frame)
 
                 if cv2.waitKey(1) == 13:
                     break
