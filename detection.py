@@ -1,5 +1,7 @@
 import numpy as np
 import cv2
+import math
+
 from utils import find_best_line, preprocess_image
 
 
@@ -49,22 +51,43 @@ def detect_lines(image):
     return detected_line_points
 
 
-def detect_numbers(frame, frame_idx):
-    dilated, thresh = preprocess_image(frame)
-    im2, contours = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+def resize_region(region):
+    return cv2.resize(region, (28, 28), interpolation=cv2.INTER_NEAREST)
 
-    found_numbers = []
+
+def select_roi(image_orig, image_bin):
+    img, contours, hierarchy = cv2.findContours(image_bin.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+    regions_array = []
     for contour in contours:
-        [x,y, width, height] = cv2.boundingRect(contour)
-        number = thresh[y:y+height, x:x+width]
+        x, y, w, h = cv2.boundingRect(contour)  # koordinate i velicina granicnog pravougaonika
+        if (h > 12 and w >= 12) or (h > 12 and w <= 4 and w >= 2):
+            region = image_bin[y:y + h + 1, x:x + w + 1]
+            regions_array.append([resize_region(region), (x, y, w, h)])
 
-        center_x = x + (width / 2)
-        center_y = y + (height /2)
-        center = (center_x, center_y)
+    regions_array = sorted(regions_array, key=lambda x: x[1][0])
 
-        found_number = tuple(frame_idx, center, number)
-        found_numbers.append(found_number)
+    sorted_regions = []
+    sorted_regions_coords = []
+    for region in regions_array:
+        sorted_regions.append(region[0])
+        sorted_regions_coords.append(region[1])
 
-    return found_numbers
+    return sorted_regions,sorted_regions_coords,
 
 
+def search_for_detection(detections, detection):
+    indices = []
+    i = 0
+    for d in detections:
+        (X1, Y1) = detection.center
+        (X2, Y2) = d.center
+
+        distance = math.sqrt(math.pow((X1 - X2),2) + math.pow((Y1 - Y2),2))
+
+        if distance < 20:
+            indices.append(i)
+
+        i += 1
+
+    return indices
