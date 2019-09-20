@@ -4,7 +4,28 @@ import argparse
 import matplotlib.pyplot as plt
 
 from architecture import Model
-from detection import detect_lines, detect_numbers
+from utils import preprocess_image, find_center, pnt2line, pnt2line2
+from detection import detect_lines, select_roi, search_for_detection
+import numpy as np
+
+
+class Detection:
+    def __init__(self, passed_green_line = False, passed_blue_line=False, label=-1, center=tuple((-1,-1)), frame_idx=-1):
+        self.passed_green_line = passed_green_line
+        self.passed_blue_line = passed_blue_line
+        self.label = label
+        self.center = center
+        self.frame_idx = frame_idx
+        self.history = []
+
+
+class History:
+    def __init__(self, passed_green_line = False, passed_blue_line=False,  center=tuple((-1,-1)), frame_idx=-1):
+        self.passed_green_line = passed_green_line
+        self.passed_blue_line = passed_blue_line
+        self.center = center
+        self.frame_idx = frame_idx
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
@@ -33,6 +54,7 @@ if __name__ == "__main__":
         print("[ERROR]: Error occurred while trying to load model weights. Message - ", e)
         exit(1)
 
+    num_sum = 0
     for filename in os.listdir(directory):
         if filename.endswith(".avi") and not filename.startswith("demo"):
             file_path = os.path.join(directory, filename)
@@ -65,9 +87,78 @@ if __name__ == "__main__":
                             exit(1)
 
                 print("[INFO]: Detecting numbers for frame with IDX = {}.".format(frame_idx))
-                detected_numbers = detect_numbers(frame, frame_idx)
+                dilated, thresh = preprocess_image(frame)
+                sorted_regions, sorted_regions_coords = select_roi(frame, thresh)
 
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                detections = []
+                for r, r_coords in zip(sorted_regions, sorted_regions_coords):
+                    detection = Detection()
+                    detection.center = find_center(r_coords)
+                    detection.frame_idx = frame_idx
+
+                    indices = search_for_detection(detections, detection)
+
+                    if len(indices) == 0:
+                        classes = model.predict_classes(np.expand_dims(np.expand_dims(r, 0), 3), 1)
+
+                        detection.label = classes[0]
+                        detections.append(detection)
+                    elif len(indices) == 1:
+                        hst = History()
+
+                        hst.frame_idx = frame_idx
+                        detections[indices[0]].frame_idx = frame_idx
+
+                        hst.center = detection.center
+                        detections[indices[0]].history.append(hst)
+
+                        detections[indices[0]].center = detection.center
+
+                for detection in detections:
+                    if (frame_idx - detection.frame_idx) > 10:
+                        continue
+
+                    passed_green_line_before = detection.passed_green_line
+                    passed_blue_line_before = detection.passed_blue_line
+
+                    color = [0, 0, 255]
+                    if passed_blue_line_before == False:
+                        print(detect_line_points[0][0], detect_line_points[0][1])
+                        dist_blue, pnt, r_blue, skip = pnt2line(detection.center, detect_line_points[0][0], detect_line_points[0][1])
+                        if skip:
+                            continue
+                        cv2.line(frame, (detect_line_points[0][0][0], detect_line_points[0][0][1]),
+                                 (detect_line_points[0][1][0], detect_line_points[0][1][1]), (0, 0, 255), 1, cv2.LINE_AA)
+
+                    if dist_blue < 12.0 and not passed_blue_line_before and r_blue == 1:
+                        num_sum += detection.label
+                        detection.passed_blue_line = True
+                        color = [220, 0, 0]
+
+                    if not passed_green_line_before:
+                        dist_green, pnt, r_green, skip = pnt2line(detection.center, detect_line_points[1][0], detect_line_points[1][1])
+                        if skip:
+                            continue
+                        cv2.line(frame, (detect_line_points[1][0][0], detect_line_points[1][0][1]),
+                                 (detect_line_points[1][1][0], detect_line_points[1][1][1]), (0, 0, 255), 1, cv2.LINE_AA)
+
+                    if dist_green < 12.0 and not passed_green_line_before and r_green == 1:
+                        num_sum -= detection.label
+                        detection.passed_green_line = True
+                        color = [0, 220, 0]
+
+                    cv2.circle(frame, detection.center, 15, color, 2)
+                    cv2.putText(frame, str(detection.value), (detection.center[0] + 12, detection.center[1] + 12),
+                                cv2.FONT_HERSHEY_COMPLEX, 1, (255, 0, 0), 2)
+
+                    for hst in detection.history:
+                        if frame_idx - hst.frame_idx < 200:
+                            cv2.circle(frame, hst.center, 1, (255, 255, 255), 1)
+
+                cv2.putText(frame, "Sum: " + str(num_sum) + "Frame number:" + str(frame_idx), (15, 20), cv2.FONT_HERSHEY_COMPLEX,1,(255, 0, 0), 1)
+                cv2.imshow('frame', frame)
+
+                if cv2.waitKey(1) == 13:
                     break
 
             # When everything done, release the video capture object
